@@ -1,0 +1,90 @@
+gen byte iwp_group = .
+replace iwp_group = 0 if arop_excl_iwp == 1
+replace iwp_group = 1 if iwp_emp == 1
+
+label define grp 0 "AROP without IWP" 1 "IWP employees"
+label values iwp_group grp
+
+gen sample_poor_1824 = (arop_excl_iwp==1 | iwp_emp==1) & inrange(year,2018,2024)
+
+
+* SMD Gesamt
+---------------------------------------------------------------------------------------------
+svy, subpop(sample_poor_1824): logistic RX060 i.iwp_group ib2018.year
+est store smd_gap
+
+* Individuelle
+---------------------------------------------------------------------------------------------
+gen dep_clothes = PD020==2
+gen dep_shoes   = PD030==2
+gen dep_social  = PD050==2
+gen dep_leisure = PD060==2
+gen dep_money   = PD070==2
+gen dep_net     = PD080==2
+
+svy, subpop(sample_poor_1824): logistic dep_clothes i.iwp_group ib2018.year
+est store dep_clothes
+
+svy, subpop(sample_poor_1824): logistic dep_shoes i.iwp_group ib2018.year
+est store dep_shoes
+
+svy, subpop(sample_poor_1824): logistic dep_social i.iwp_group ib2018.year
+est store dep_social
+
+svy, subpop(sample_poor_1824): logistic dep_leisure i.iwp_group ib2018.year
+est store dep_leisure
+
+svy, subpop(sample_poor_1824): logistic dep_money i.iwp_group ib2018.year
+est store dep_money
+
+svy, subpop(sample_poor_1824): logistic dep_net i.iwp_group ib2018.year
+est store dep_net
+
+
+* HH indik
+---------------------------------------------------------------------------------------------
+gen dep_holiday = HS040==2
+gen dep_meat    = HS050==2
+gen dep_unexp   = HS060==2
+gen dep_arrear1 = HS011==1
+gen dep_arrear2 = HS021==1
+gen dep_arrear3 = HS031==1
+gen dep_warm    = HH050==2
+
+svy, subpop(sample_poor_1824): logistic dep_holiday i.iwp_group ib2018.year
+est store dep_holiday
+
+svy, subpop(sample_poor_1824): logistic dep_meat i.iwp_group ib2018.year
+est store dep_meat
+
+svy, subpop(sample_poor_1824): logistic dep_unexp i.iwp_group ib2018.year
+est store dep_unexp
+
+svy, subpop(sample_poor_1824): logistic dep_arrear_rent i.iwp_group ib2018.year
+est store dep_arrear_rent
+
+svy, subpop(sample_poor_1824): logistic dep_arrear_util i.iwp_group ib2018.year
+est store dep_arrear_util
+
+svy, subpop(sample_poor_1824): logistic dep_arrear_loan i.iwp_group ib2018.year
+est store dep_arrear_loan
+
+svy, subpop(sample_poor_1824): logistic dep_warm i.iwp_group ib2018.year
+est store dep_warm
+
+* Same same aber hh typen
+---------------------------------------------------------------------------------------------
+gen sub_hh1 = sample_poor_1824==1 & hh_type==1
+gen sub_hh2 = sample_poor_1824==1 & hh_type==2
+gen sub_hh3 = sample_poor_1824==1 & hh_type==3
+gen sub_hh4 = sample_poor_1824==1 & hh_type==4
+gen sub_hh5 = sample_poor_1824==1 & hh_type==5
+gen sub_hh6 = sample_poor_1824==1 & hh_type==6
+gen sub_hh7 = sample_poor_1824==1 & hh_type==7
+gen sub_hh8 = sample_poor_1824==1 & hh_type==8
+gen sub_hh9 = sample_poor_1824==1 & hh_type==9
+
+
+
+
+
