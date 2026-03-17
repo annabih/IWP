@@ -1,5 +1,9 @@
 *===============================================================================
-* REGRESSION NACH HAUSHALTSTYP - STANDALONE CODE
+* REGRESSION NACH HAUSHALTSTYP - BEREINIGT
+* Änderungen ggü. Vorversion:
+*   1. capture-Bug behoben: est store nur bei _rc==0
+*   2. Sample auf 18-64 beschränkt (konsistent: IWP Employees sind per Def 18-64)
+*   3. Fehlende HH-Typen (z.B. HH3 mit wenig Fällen) werden sauber übersprungen
 *===============================================================================
 
 use "D:\Data\AT_CROSS\SILC_CrossSec_AllYears_2015_2024.dta", clear
@@ -22,8 +26,6 @@ foreach var in PL073 PL074 PL075 PL076 {
     capture confirm variable `var'
     if _rc == 0 replace months_worked = months_worked + `var' if !missing(`var')
 }
-
-
 replace months_worked = 12 if months_worked > 12 & !missing(months_worked)
 
 drop if missing(HX090) | missing(dwt) | missing(age)
@@ -50,14 +52,16 @@ gen inwork_poor_post = (worker == 1 & arop_post == 1)
 gen axi_post         = (arop_post == 1 & inwork_poor_post == 0)
 gen iwp_emp_post     = (inwork_poor_post == 1 & emp_status == 3)
 
+*--- Gruppe & Sample ---
 gen byte iwp_group = .
-replace iwp_group = 0 if axi_post == 1
+replace iwp_group = 0 if axi_post == 1 & age >= 18 & age <= 64
 replace iwp_group = 1 if iwp_emp_post == 1
-label define grp 0 "AROP w/o IWP" 1 "IWP Employees"
+label define grp 0 "AROP w/o IWP (18-64)" 1 "IWP Employees"
 label values iwp_group grp
 
-gen sample = (axi_post == 1 | iwp_emp_post == 1)
+gen sample = (!missing(iwp_group))
 
+*--- Deprivationsvariablen ---
 gen dep_clothes  = (PD020 == 2) if !missing(PD020)
 gen dep_shoes    = (PD030 == 2) if !missing(PD030)
 gen dep_social   = (PD050 == 2) if !missing(PD050)
@@ -74,7 +78,19 @@ gen dep_warm     = (HH050 == 2) if !missing(HH050)
 gen dep_smd      = (RX060 == 1) if !missing(RX060)
 
 *--- HH-Typ ---
-gen hh_id = id_hh
+capture confirm variable id_hh
+if _rc == 0 {
+    gen hh_id = id_hh
+}
+else {
+    capture confirm variable HB030
+    if _rc == 0 {
+        gen hh_id = HB030
+    }
+    else {
+        gen hh_id = DB030
+    }
+}
 
 bysort year hh_id: egen n_adults   = total(age >= 14)
 bysort year hh_id: egen n_children = total(age < 14)
@@ -90,241 +106,104 @@ replace hh_type = 7 if n_adults == 2 & n_children >= 3
 replace hh_type = 8 if n_adults >= 3 & n_children == 0
 replace hh_type = 9 if n_adults >= 3 & n_children >= 1
 
-gen sample_hh1 = (sample == 1 & hh_type == 1)
-gen sample_hh2 = (sample == 1 & hh_type == 2)
-gen sample_hh3 = (sample == 1 & hh_type == 3)
-gen sample_hh4 = (sample == 1 & hh_type == 4)
-gen sample_hh5 = (sample == 1 & hh_type == 5)
-gen sample_hh6 = (sample == 1 & hh_type == 6)
-gen sample_hh7 = (sample == 1 & hh_type == 7)
-gen sample_hh8 = (sample == 1 & hh_type == 8)
-gen sample_hh9 = (sample == 1 & hh_type == 9)
+label define hh_type_lbl 1 "1 Erwachsener" 2 "1E+1K" 3 "1E+2+K" 4 "2 Erwachsene" 5 "2E+1K" 6 "2E+2K" 7 "2E+3+K" 8 "3+E" 9 "3+E+K"
+label values hh_type hh_type_lbl
+
+*--- HH-spezifische Sample-Variablen ---
+forvalues ht = 1/9 {
+    gen sample_hh`ht' = (sample == 1 & hh_type == `ht')
+}
 
 svyset [pw=dwt], vce(linearized)
 
 *===============================================================================
-* HH-TYP 1: 1 Erwachsener ohne Kinder
+* DEPRIVATIONS-LISTE UND HH-TYP-LABELS
 *===============================================================================
 
-svy, subpop(sample_hh1): logistic dep_smd     i.iwp_group ib2018.year
-est store hh1_smd
-svy, subpop(sample_hh1): logistic dep_clothes i.iwp_group ib2018.year
-est store hh1_clothes
-svy, subpop(sample_hh1): logistic dep_social  i.iwp_group ib2018.year
-est store hh1_social
-svy, subpop(sample_hh1): logistic dep_leisure i.iwp_group ib2018.year
-est store hh1_leisure
-svy, subpop(sample_hh1): logistic dep_unexp   i.iwp_group ib2018.year
-est store hh1_unexp
-svy, subpop(sample_hh1): logistic dep_warm    i.iwp_group ib2018.year
-est store hh1_warm
-svy, subpop(sample_hh1): logistic dep_holiday i.iwp_group ib2018.year
-est store hh1_holiday
-svy, subpop(sample_hh1): logistic dep_meat    i.iwp_group ib2018.year
-est store hh1_meat
+local dep_list "dep_smd dep_clothes dep_social dep_leisure dep_unexp dep_warm dep_holiday dep_meat"
 
-di _n "=== HH-TYP 1: 1 Erwachsener ohne Kinder ==="
-esttab hh1_smd hh1_clothes hh1_social hh1_leisure hh1_unexp hh1_warm hh1_holiday hh1_meat, eform ci nostar keep(1.iwp_group) coeflabels(1.iwp_group "OR: IWP vs. AROP w/o IWP")
-esttab hh1_smd hh1_clothes hh1_social hh1_leisure hh1_unexp hh1_warm hh1_holiday hh1_meat using "$output\Regression_HH1.csv", eform ci nostar replace keep(1.iwp_group) title("HH-Typ 1: 1 Erwachsener ohne Kinder") note("OR 95pct KI. Ref: AROP w/o IWP. svy-gewichtet.")
+local hh_label_1 "1 Erwachsener ohne Kinder"
+local hh_label_2 "1 Erwachsener + 1 Kind"
+local hh_label_3 "1 Erwachsener + 2+ Kinder"
+local hh_label_4 "2 Erwachsene ohne Kinder"
+local hh_label_5 "2 Erwachsene + 1 Kind"
+local hh_label_6 "2 Erwachsene + 2 Kinder"
+local hh_label_7 "2 Erwachsene + 3+ Kinder"
+local hh_label_8 "3+ Erwachsene ohne Kinder"
+local hh_label_9 "3+ Erwachsene mit Kindern"
 
 *===============================================================================
-* HH-TYP 2: 1 Erwachsener + 1 Kind
+* LOOP ÜBER ALLE HH-TYPEN
 *===============================================================================
 
-svy, subpop(sample_hh2): logistic dep_smd     i.iwp_group ib2018.year
-est store hh2_smd
-svy, subpop(sample_hh2): logistic dep_clothes i.iwp_group ib2018.year
-est store hh2_clothes
-svy, subpop(sample_hh2): logistic dep_social  i.iwp_group ib2018.year
-est store hh2_social
-svy, subpop(sample_hh2): logistic dep_leisure i.iwp_group ib2018.year
-est store hh2_leisure
-svy, subpop(sample_hh2): logistic dep_unexp   i.iwp_group ib2018.year
-est store hh2_unexp
-svy, subpop(sample_hh2): logistic dep_warm    i.iwp_group ib2018.year
-est store hh2_warm
-svy, subpop(sample_hh2): logistic dep_holiday i.iwp_group ib2018.year
-est store hh2_holiday
-svy, subpop(sample_hh2): logistic dep_meat    i.iwp_group ib2018.year
-est store hh2_meat
+forvalues ht = 1/9 {
 
-di _n "=== HH-TYP 2: 1 Erwachsener + 1 Kind ==="
-esttab hh2_smd hh2_clothes hh2_social hh2_leisure hh2_unexp hh2_warm hh2_holiday hh2_meat, eform ci nostar keep(1.iwp_group) coeflabels(1.iwp_group "OR: IWP vs. AROP w/o IWP")
-esttab hh2_smd hh2_clothes hh2_social hh2_leisure hh2_unexp hh2_warm hh2_holiday hh2_meat using "$output\Regression_HH2.csv", eform ci nostar replace keep(1.iwp_group) title("HH-Typ 2: 1 Erwachsener + 1 Kind") note("OR 95pct KI. Ref: AROP w/o IWP. svy-gewichtet.")
+    di _n "================================================================="
+    di "=== HH-TYP `ht': `hh_label_`ht'' ==="
+    di "=================================================================" _n
 
-*===============================================================================
-* HH-TYP 3: 1 Erwachsener + 2+ Kinder
-*===============================================================================
+    * Prüfe ob genug Beobachtungen in beiden Gruppen
+    quietly count if sample_hh`ht' == 1 & iwp_group == 0
+    local n_ref = r(N)
+    quietly count if sample_hh`ht' == 1 & iwp_group == 1
+    local n_treat = r(N)
 
-capture svy, subpop(sample_hh3): logistic dep_smd     i.iwp_group ib2018.year
-est store hh3_smd
-capture svy, subpop(sample_hh3): logistic dep_clothes i.iwp_group ib2018.year
-est store hh3_clothes
-capture svy, subpop(sample_hh3): logistic dep_social  i.iwp_group ib2018.year
-est store hh3_social
-capture svy, subpop(sample_hh3): logistic dep_leisure i.iwp_group ib2018.year
-est store hh3_leisure
-capture svy, subpop(sample_hh3): logistic dep_unexp   i.iwp_group ib2018.year
-est store hh3_unexp
-capture svy, subpop(sample_hh3): logistic dep_warm    i.iwp_group ib2018.year
-est store hh3_warm
-capture svy, subpop(sample_hh3): logistic dep_holiday i.iwp_group ib2018.year
-est store hh3_holiday
-capture svy, subpop(sample_hh3): logistic dep_meat    i.iwp_group ib2018.year
-est store hh3_meat
+    di "  N AROP w/o IWP (18-64): `n_ref'"
+    di "  N IWP Employees:        `n_treat'"
 
-di _n "=== HH-TYP 3: 1 Erwachsener + 2+ Kinder ==="
-esttab hh3_smd hh3_clothes hh3_social hh3_leisure hh3_unexp hh3_warm hh3_holiday hh3_meat, eform ci nostar keep(1.iwp_group) coeflabels(1.iwp_group "OR: IWP vs. AROP w/o IWP")
-esttab hh3_smd hh3_clothes hh3_social hh3_leisure hh3_unexp hh3_warm hh3_holiday hh3_meat using "$output\Regression_HH3.csv", eform ci nostar replace keep(1.iwp_group) title("HH-Typ 3: 1 Erwachsener + 2+ Kinder") note("OR 95pct KI. Ref: AROP w/o IWP. svy-gewichtet.")
+    if `n_ref' < 30 | `n_treat' < 30 {
+        di as error "  ÜBERSPRUNGEN: Zu wenig Beobachtungen (min 30 pro Gruppe erforderlich)"
+        di as error "  Keine Regression für HH-Typ `ht'"
+        continue
+    }
 
-*===============================================================================
-* HH-TYP 4: 2 Erwachsene ohne Kinder
-*===============================================================================
+    * Schätze jedes Deprivationsmodell einzeln
+    local stored_models ""
+    local stored_count = 0
 
-svy, subpop(sample_hh4): logistic dep_smd     i.iwp_group ib2018.year
-est store hh4_smd
-svy, subpop(sample_hh4): logistic dep_clothes i.iwp_group ib2018.year
-est store hh4_clothes
-svy, subpop(sample_hh4): logistic dep_social  i.iwp_group ib2018.year
-est store hh4_social
-svy, subpop(sample_hh4): logistic dep_leisure i.iwp_group ib2018.year
-est store hh4_leisure
-svy, subpop(sample_hh4): logistic dep_unexp   i.iwp_group ib2018.year
-est store hh4_unexp
-svy, subpop(sample_hh4): logistic dep_warm    i.iwp_group ib2018.year
-est store hh4_warm
-svy, subpop(sample_hh4): logistic dep_holiday i.iwp_group ib2018.year
-est store hh4_holiday
-svy, subpop(sample_hh4): logistic dep_meat    i.iwp_group ib2018.year
-est store hh4_meat
+    foreach depvar of local dep_list {
 
-di _n "=== HH-TYP 4: 2 Erwachsene ohne Kinder ==="
-esttab hh4_smd hh4_clothes hh4_social hh4_leisure hh4_unexp hh4_warm hh4_holiday hh4_meat, eform ci nostar keep(1.iwp_group) coeflabels(1.iwp_group "OR: IWP vs. AROP w/o IWP")
-esttab hh4_smd hh4_clothes hh4_social hh4_leisure hh4_unexp hh4_warm hh4_holiday hh4_meat using "$output\Regression_HH4.csv", eform ci nostar replace keep(1.iwp_group) title("HH-Typ 4: 2 Erwachsene ohne Kinder") note("OR 95pct KI. Ref: AROP w/o IWP. svy-gewichtet.")
+        * Prüfe ob genug Variation in der DV
+        quietly count if sample_hh`ht' == 1 & `depvar' == 1
+        local n_deprived = r(N)
+        quietly count if sample_hh`ht' == 1 & `depvar' == 0
+        local n_not_deprived = r(N)
 
-*===============================================================================
-* HH-TYP 5: 2 Erwachsene + 1 Kind
-*===============================================================================
+        if `n_deprived' < 10 | `n_not_deprived' < 10 {
+            di as text "  `depvar': übersprungen (zu wenig Variation: `n_deprived' deprived, `n_not_deprived' not)"
+            continue
+        }
 
-svy, subpop(sample_hh5): logistic dep_smd     i.iwp_group ib2018.year
-est store hh5_smd
-svy, subpop(sample_hh5): logistic dep_clothes i.iwp_group ib2018.year
-est store hh5_clothes
-svy, subpop(sample_hh5): logistic dep_social  i.iwp_group ib2018.year
-est store hh5_social
-svy, subpop(sample_hh5): logistic dep_leisure i.iwp_group ib2018.year
-est store hh5_leisure
-svy, subpop(sample_hh5): logistic dep_unexp   i.iwp_group ib2018.year
-est store hh5_unexp
-svy, subpop(sample_hh5): logistic dep_warm    i.iwp_group ib2018.year
-est store hh5_warm
-svy, subpop(sample_hh5): logistic dep_holiday i.iwp_group ib2018.year
-est store hh5_holiday
-svy, subpop(sample_hh5): logistic dep_meat    i.iwp_group ib2018.year
-est store hh5_meat
+        di _n "  --- `depvar' ---"
+        capture svy, subpop(sample_hh`ht'): logistic `depvar' i.iwp_group ib2018.year
+        if _rc == 0 {
+            est store hh`ht'_`depvar'
+            local stored_models "`stored_models' hh`ht'_`depvar'"
+            local stored_count = `stored_count' + 1
+            di "  `depvar': geschätzt OK"
+        }
+        else {
+            di as error "  `depvar': Schätzung fehlgeschlagen (rc = " _rc ")"
+        }
+    }
 
-di _n "=== HH-TYP 5: 2 Erwachsene + 1 Kind ==="
-esttab hh5_smd hh5_clothes hh5_social hh5_leisure hh5_unexp hh5_warm hh5_holiday hh5_meat, eform ci nostar keep(1.iwp_group) coeflabels(1.iwp_group "OR: IWP vs. AROP w/o IWP")
-esttab hh5_smd hh5_clothes hh5_social hh5_leisure hh5_unexp hh5_warm hh5_holiday hh5_meat using "$output\Regression_HH5.csv", eform ci nostar replace keep(1.iwp_group) title("HH-Typ 5: 2 Erwachsene + 1 Kind") note("OR 95pct KI. Ref: AROP w/o IWP. svy-gewichtet.")
+    * Output nur wenn mindestens ein Modell geschätzt wurde
+    if `stored_count' > 0 {
+        di _n "=== ZUSAMMENFASSUNG HH-TYP `ht': `hh_label_`ht'' ==="
+        esttab `stored_models', eform ci nostar keep(1.iwp_group) coeflabels(1.iwp_group "OR: IWP Emp vs. AROP w/o IWP (18-64)") title("HH-Typ `ht': `hh_label_`ht''")
 
-*===============================================================================
-* HH-TYP 6: 2 Erwachsene + 2 Kinder
-*===============================================================================
+        esttab `stored_models' using "$output\Regression_HH`ht'.csv", eform ci nostar replace keep(1.iwp_group) title("HH-Typ `ht': `hh_label_`ht''") note("OR mit 95% KI. Ref: AROP w/o IWP (18-64). Year-FE (Ref: 2018). svy-gewichtet. Sample: 18-64.")
+    }
+    else {
+        di as error "  Kein Modell geschätzt für HH-Typ `ht'"
+    }
 
-svy, subpop(sample_hh6): logistic dep_smd     i.iwp_group ib2018.year
-est store hh6_smd
-svy, subpop(sample_hh6): logistic dep_clothes i.iwp_group ib2018.year
-est store hh6_clothes
-svy, subpop(sample_hh6): logistic dep_social  i.iwp_group ib2018.year
-est store hh6_social
-svy, subpop(sample_hh6): logistic dep_leisure i.iwp_group ib2018.year
-est store hh6_leisure
-svy, subpop(sample_hh6): logistic dep_unexp   i.iwp_group ib2018.year
-est store hh6_unexp
-svy, subpop(sample_hh6): logistic dep_warm    i.iwp_group ib2018.year
-est store hh6_warm
-svy, subpop(sample_hh6): logistic dep_holiday i.iwp_group ib2018.year
-est store hh6_holiday
-svy, subpop(sample_hh6): logistic dep_meat    i.iwp_group ib2018.year
-est store hh6_meat
-
-di _n "=== HH-TYP 6: 2 Erwachsene + 2 Kinder ==="
-esttab hh6_smd hh6_clothes hh6_social hh6_leisure hh6_unexp hh6_warm hh6_holiday hh6_meat, eform ci nostar keep(1.iwp_group) coeflabels(1.iwp_group "OR: IWP vs. AROP w/o IWP")
-esttab hh6_smd hh6_clothes hh6_social hh6_leisure hh6_unexp hh6_warm hh6_holiday hh6_meat using "$output\Regression_HH6.csv", eform ci nostar replace keep(1.iwp_group) title("HH-Typ 6: 2 Erwachsene + 2 Kinder") note("OR 95pct KI. Ref: AROP w/o IWP. svy-gewichtet.")
-
-*===============================================================================
-* HH-TYP 7: 2 Erwachsene + 3+ Kinder
-*===============================================================================
-
-capture svy, subpop(sample_hh7): logistic dep_smd     i.iwp_group ib2018.year
-est store hh7_smd
-capture svy, subpop(sample_hh7): logistic dep_clothes i.iwp_group ib2018.year
-est store hh7_clothes
-capture svy, subpop(sample_hh7): logistic dep_social  i.iwp_group ib2018.year
-est store hh7_social
-capture svy, subpop(sample_hh7): logistic dep_leisure i.iwp_group ib2018.year
-est store hh7_leisure
-capture svy, subpop(sample_hh7): logistic dep_unexp   i.iwp_group ib2018.year
-est store hh7_unexp
-capture svy, subpop(sample_hh7): logistic dep_warm    i.iwp_group ib2018.year
-est store hh7_warm
-capture svy, subpop(sample_hh7): logistic dep_holiday i.iwp_group ib2018.year
-est store hh7_holiday
-capture svy, subpop(sample_hh7): logistic dep_meat    i.iwp_group ib2018.year
-est store hh7_meat
-
-di _n "=== HH-TYP 7: 2 Erwachsene + 3+ Kinder ==="
-esttab hh7_smd hh7_clothes hh7_social hh7_leisure hh7_unexp hh7_warm hh7_holiday hh7_meat, eform ci nostar keep(1.iwp_group) coeflabels(1.iwp_group "OR: IWP vs. AROP w/o IWP")
-esttab hh7_smd hh7_clothes hh7_social hh7_leisure hh7_unexp hh7_warm hh7_holiday hh7_meat using "$output\Regression_HH7.csv", eform ci nostar replace keep(1.iwp_group) title("HH-Typ 7: 2 Erwachsene + 3+ Kinder") note("OR 95pct KI. Ref: AROP w/o IWP. svy-gewichtet.")
-
-*===============================================================================
-* HH-TYP 8: 3+ Erwachsene ohne Kinder
-*===============================================================================
-
-svy, subpop(sample_hh8): logistic dep_smd     i.iwp_group ib2018.year
-est store hh8_smd
-svy, subpop(sample_hh8): logistic dep_clothes i.iwp_group ib2018.year
-est store hh8_clothes
-svy, subpop(sample_hh8): logistic dep_social  i.iwp_group ib2018.year
-est store hh8_social
-svy, subpop(sample_hh8): logistic dep_leisure i.iwp_group ib2018.year
-est store hh8_leisure
-svy, subpop(sample_hh8): logistic dep_unexp   i.iwp_group ib2018.year
-est store hh8_unexp
-svy, subpop(sample_hh8): logistic dep_warm    i.iwp_group ib2018.year
-est store hh8_warm
-svy, subpop(sample_hh8): logistic dep_holiday i.iwp_group ib2018.year
-est store hh8_holiday
-svy, subpop(sample_hh8): logistic dep_meat    i.iwp_group ib2018.year
-est store hh8_meat
-
-di _n "=== HH-TYP 8: 3+ Erwachsene ohne Kinder ==="
-esttab hh8_smd hh8_clothes hh8_social hh8_leisure hh8_unexp hh8_warm hh8_holiday hh8_meat, eform ci nostar keep(1.iwp_group) coeflabels(1.iwp_group "OR: IWP vs. AROP w/o IWP")
-esttab hh8_smd hh8_clothes hh8_social hh8_leisure hh8_unexp hh8_warm hh8_holiday hh8_meat using "$output\Regression_HH8.csv", eform ci nostar replace keep(1.iwp_group) title("HH-Typ 8: 3+ Erwachsene ohne Kinder") note("OR 95pct KI. Ref: AROP w/o IWP. svy-gewichtet.")
-
-*===============================================================================
-* HH-TYP 9: 3+ Erwachsene mit Kindern
-*===============================================================================
-
-capture svy, subpop(sample_hh9): logistic dep_smd     i.iwp_group ib2018.year
-est store hh9_smd
-capture svy, subpop(sample_hh9): logistic dep_clothes i.iwp_group ib2018.year
-est store hh9_clothes
-capture svy, subpop(sample_hh9): logistic dep_social  i.iwp_group ib2018.year
-est store hh9_social
-capture svy, subpop(sample_hh9): logistic dep_leisure i.iwp_group ib2018.year
-est store hh9_leisure
-capture svy, subpop(sample_hh9): logistic dep_unexp   i.iwp_group ib2018.year
-est store hh9_unexp
-capture svy, subpop(sample_hh9): logistic dep_warm    i.iwp_group ib2018.year
-est store hh9_warm
-capture svy, subpop(sample_hh9): logistic dep_holiday i.iwp_group ib2018.year
-est store hh9_holiday
-capture svy, subpop(sample_hh9): logistic dep_meat    i.iwp_group ib2018.year
-est store hh9_meat
-
-di _n "=== HH-TYP 9: 3+ Erwachsene mit Kindern ==="
-esttab hh9_smd hh9_clothes hh9_social hh9_leisure hh9_unexp hh9_warm hh9_holiday hh9_meat, eform ci nostar keep(1.iwp_group) coeflabels(1.iwp_group "OR: IWP vs. AROP w/o IWP")
-esttab hh9_smd hh9_clothes hh9_social hh9_leisure hh9_unexp hh9_warm hh9_holiday hh9_meat using "$output\Regression_HH9.csv", eform ci nostar replace keep(1.iwp_group) title("HH-Typ 9: 3+ Erwachsene mit Kindern") note("OR 95pct KI. Ref: AROP w/o IWP. svy-gewichtet.")
+    estimates clear
+}
 
 di as result _n "=== ALLE HH-TYP REGRESSIONEN FERTIG ==="
+di "Änderungen ggü. Vorversion:"
+di "  1. capture-Bug behoben (est store nur bei _rc==0)"
+di "  2. AROP w/o IWP Referenzgruppe auf 18-64 beschränkt"
+di "  3. Automatische Prüfung Stichprobengröße und Variation"
+di "  4. Loop statt Copy-Paste (weniger fehleranfällig)"
